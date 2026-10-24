@@ -32,7 +32,11 @@ textarea, select { width: 100%; padding: 8px; margin: 6px 0 10px; background: va
 button { font: inherit; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg); cursor: pointer; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
-.output { margin-top: 12px; white-space: pre-wrap; word-wrap: break-word; }
+.output { margin-top: 12px; word-wrap: break-word; }
+.output p { margin: 0 0 10px; }
+.output ul, .output ol { margin: 0 0 10px; padding-left: 20px; }
+.output pre { overflow-x: auto; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.output code { font-size: 12px; }
 #output-actions { margin-top: 8px; }
 
 .access { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 12px 0 0; }

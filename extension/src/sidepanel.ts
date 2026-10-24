@@ -1,14 +1,77 @@
+import { marked } from "marked";
+import DOMPurify from "dompurify";
+import { streamPost } from "./api";
 import { getActivePageData } from "./page";
-import { hasAllSites, hasSiteAccess, requestAllSites, requestSite, sitePattern } from "./permissions";
+import type { PageData } from "./types";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusEl = $("status");
 const outputEl = $("output");
 const pageTitleEl = $("page-title");
+const stopBtn = $<HTMLButtonElement>("stop");
+const actionsEl = $("output-actions");
+const copyBtn = $<HTMLButtonElement>("copy");
+const actionButtons = document.querySelectorAll<HTMLButtonElement>("button.primary");
 
+// Open links from model output in a new tab, never inside the panel.
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
+let controller: AbortController | null = null;
+let lastText = "";
+
+function render(markdown: string) {
+  const html = marked.parse(markdown, { async: false }) as string;
+  outputEl.innerHTML = DOMPurify.sanitize(html);
+}
+
+function setBusy(busy: boolean) {
+  actionButtons.forEach((b) => (b.disabled = busy));
+  stopBtn.classList.toggle("hidden", !busy);
+}
+
+async function run(path: string, buildBody: (page: PageData) => unknown) {
+  controller?.abort();
+  controller = new AbortController();
+  const { signal } = controller;
+
+  lastText = "";
+  outputEl.innerHTML = "";
+  actionsEl.classList.add("hidden");
+  setBusy(true);
+  statusEl.textContent = "Reading page...";
+
+  try {
+    const page = await getActivePageData();
+    pageTitleEl.textContent = page.title || page.url;
+    statusEl.textContent =
+      "Thinking..." + (page.truncated ? " (long page: using the first part)" : "");
+
+    for await (const ev of streamPost(path, buildBody(page), signal)) {
+      if (ev.type === "text") {
+        lastText += ev.text;
+        statusEl.textContent = "";
+        render(lastText);
+      } else if (ev.type === "error") {
+        statusEl.textContent = ev.message;
+      }
+    }
+  } catch (err) {
+    const e = err as Error;
+    statusEl.textContent = e.name === "AbortError" ? "Stopped." : e.message;
+  } finally {
+    setBusy(false);
+    if (lastText) actionsEl.classList.remove("hidden");
+  }
+}
+
+// Tabs
 const tabs = document.querySelectorAll<HTMLButtonElement>(".tab");
 const modes = document.querySelectorAll<HTMLElement>(".mode");
-
 tabs.forEach((tab) => {
   tab.addEventListener("click", () => {
     const mode = tab.dataset.mode;
@@ -17,69 +80,15 @@ tabs.forEach((tab) => {
   });
 });
 
-$("run-summarize").addEventListener("click", async () => {
-  outputEl.textContent = "";
-  statusEl.textContent = "Reading page...";
-  try {
-    const page = await getActivePageData();
-    pageTitleEl.textContent = page.title;
-    statusEl.textContent =
-      `Read ${page.text.length} characters using ${page.method}` +
-      (page.truncated ? " (truncated)" : "");
-    outputEl.textContent = page.text.slice(0, 1000);
-  } catch (err) {
-    statusEl.textContent = (err as Error).message;
-  }
+// Summarize
+$("run-summarize").addEventListener("click", () =>
+  run("/summarize", (p) => ({ url: p.url, title: p.title, text: p.text }))
+);
+
+// Stop and Copy
+stopBtn.addEventListener("click", () => controller?.abort());
+copyBtn.addEventListener("click", async () => {
+  await navigator.clipboard.writeText(lastText);
+  copyBtn.textContent = "Copied";
+  setTimeout(() => (copyBtn.textContent = "Copy"), 1500);
 });
-
-const accessBox = $("access");
-const accessText = $("access-text");
-const accessBtn = $<HTMLButtonElement>("access-btn");
-let accessAction: (() => Promise<boolean>) | null = null;
-
-async function refreshAccessBox() {
-  accessAction = null;
-  const hide = () => accessBox.classList.add("hidden");
-  const show = () => accessBox.classList.remove("hidden");
-
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
-  if (!tab || (await hasAllSites())) return hide();
-
-  if (!tab.url) {
-    // Chrome is hiding this tab because the extension has no access to it yet.
-    // (This also happens on chrome:// pages, which can never be read.)
-    accessText.textContent = "Chrome is hiding this tab from Page Insight until you allow access.";
-    accessBtn.textContent = "Allow on all sites";
-    accessAction = requestAllSites;
-    return show();
-  }
-
-  if (sitePattern(tab.url) && !(await hasSiteAccess(tab.url))) {
-    const url = tab.url;
-    const host = new URL(url).hostname;
-    accessText.textContent = `Page Insight can read this tab now. To keep working on ${host} without clicking the toolbar icon each time, allow the site.`;
-    accessBtn.textContent = `Always allow on ${host}`;
-    accessAction = () => requestSite(url);
-    return show();
-  }
-
-  hide();
-}
-
-accessBtn.addEventListener("click", async () => {
-  if (!accessAction) return;
-  const granted = await accessAction(); // first await in the handler, so the click still counts
-  statusEl.textContent = granted
-    ? "Access granted. Press the button again."
-    : "Access was not granted.";
-  await refreshAccessBox();
-});
-
-// Re-check whenever the user changes tabs, a page finishes loading, or permissions change.
-chrome.tabs.onActivated.addListener(() => void refreshAccessBox());
-chrome.tabs.onUpdated.addListener((_id, info) => {
-  if (info.status === "complete") void refreshAccessBox();
-});
-chrome.permissions.onAdded.addListener(() => void refreshAccessBox());
-chrome.permissions.onRemoved.addListener(() => void refreshAccessBox());
-void refreshAccessBox();
