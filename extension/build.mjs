@@ -11,7 +11,8 @@ const options = {
   entryPoints: {
     background: "src/background.ts",
     sidepanel: "src/sidepanel.ts",
-  },
+    content: "src/content.ts",
+    },
   bundle: true,
   outdir: "dist",
   target: "chrome114",

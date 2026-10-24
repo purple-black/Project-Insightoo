@@ -34,3 +34,6 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 .output { margin-top: 12px; white-space: pre-wrap; word-wrap: break-word; }
 #output-actions { margin-top: 8px; }
+
+.access { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 12px 0 0; }
+.access p { margin: 0 0 8px; }
