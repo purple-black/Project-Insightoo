@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Page Insight",
+  "version": "0.1.0",
+  "description": "Summarize, ask questions about, and extract data from the page you are reading.",
+  "permissions": ["activeTab", "scripting", "sidePanel", "storage"],
+  "host_permissions": ["http://localhost:8000/*"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "action": { "default_title": "Open Page Insight" }
+}
