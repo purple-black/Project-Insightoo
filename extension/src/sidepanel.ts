@@ -1,6 +1,6 @@
 import { marked } from "marked";
 import DOMPurify from "dompurify";
-import { streamPost } from "./api";
+import { postJson, streamPost } from "./api";
 import { getActivePageData } from "./page";
 import type { PageData } from "./types";
 
@@ -34,7 +34,7 @@ function setBusy(busy: boolean) {
   stopBtn.classList.toggle("hidden", !busy);
 }
 
-async function run(path: string, buildBody: (page: PageData) => unknown) {
+async function session(work: (signal: AbortSignal) => Promise<void>) {
   controller?.abort();
   controller = new AbortController();
   const { signal } = controller;
@@ -46,6 +46,18 @@ async function run(path: string, buildBody: (page: PageData) => unknown) {
   statusEl.textContent = "Reading page...";
 
   try {
+    await work(signal);
+  } catch (err) {
+    const e = err as Error;
+    statusEl.textContent = e.name === "AbortError" ? "Stopped." : e.message;
+  } finally {
+    setBusy(false);
+    if (lastText) actionsEl.classList.remove("hidden");
+  }
+}
+
+function run(path: string, buildBody: (page: PageData) => unknown) {
+  return session(async (signal) => {
     const page = await getActivePageData();
     pageTitleEl.textContent = page.title || page.url;
     statusEl.textContent =
@@ -60,13 +72,39 @@ async function run(path: string, buildBody: (page: PageData) => unknown) {
         statusEl.textContent = ev.message;
       }
     }
-  } catch (err) {
-    const e = err as Error;
-    statusEl.textContent = e.name === "AbortError" ? "Stopped." : e.message;
-  } finally {
-    setBusy(false);
-    if (lastText) actionsEl.classList.remove("hidden");
-  }
+  });
+}
+
+interface ExtractResponse {
+  data: Record<string, unknown>;
+  ungrounded: string[];
+}
+
+function runExtract() {
+  return session(async (signal) => {
+    const page = await getActivePageData();
+    pageTitleEl.textContent = page.title || page.url;
+    statusEl.textContent = "Extracting...";
+
+    const kind = $<HTMLSelectElement>("schema").value;
+    const res = await postJson<ExtractResponse>(
+      "/extract",
+      { url: page.url, title: page.title, text: page.text, json_ld: page.jsonLd, kind },
+      signal
+    );
+
+    lastText = JSON.stringify(res.data, null, 2);
+    // textContent (not innerHTML) so the JSON can never be treated as markup.
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = lastText;
+    pre.append(code);
+    outputEl.append(pre);
+
+    statusEl.textContent = res.ungrounded.length
+      ? `Check these values, they were not found on the page: ${res.ungrounded.join("; ")}`
+      : "";
+  });
 }
 
 // Tabs
@@ -84,6 +122,8 @@ tabs.forEach((tab) => {
 $("run-summarize").addEventListener("click", () =>
   run("/summarize", (p) => ({ url: p.url, title: p.title, text: p.text }))
 );
+
+$("run-extract").addEventListener("click", () => runExtract());
 
 // Stop and Copy
 stopBtn.addEventListener("click", () => controller?.abort());

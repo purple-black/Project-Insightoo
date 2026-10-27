@@ -50,3 +50,24 @@ export async function* streamPost(
     }
   }
 }
+
+export async function postJson<T>(
+  path: string,
+  body: unknown,
+  signal: AbortSignal
+): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError") throw err;
+    throw new Error("Could not reach the server. Is it running?");
+  }
+  if (!res.ok) throw new Error(`The server returned an error (${res.status}).`);
+  return (await res.json()) as T;
+}
